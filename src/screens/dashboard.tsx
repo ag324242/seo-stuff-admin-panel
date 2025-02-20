@@ -28,7 +28,7 @@ export default function Dashboard() {
     const [userCredits, setUserCredits] = useState<Record<string, number>>({});
     const [selectedUser, setSelectedUser] = useState<UserDetails | null>(null);
     const [isDialogOpen, setIsDialogOpen] = useState(false);
-    const ITEMS_PER_PAGE = 2;
+    const ITEMS_PER_PAGE = 10;
     const [userDetails, setUserDetails] = useState<UserDetails[]>([]);
     const [searchQuery, setSearchQuery] = useState("");
     const [isPaginatedLoading, setIsPaginatedLoading] = useState(true);
