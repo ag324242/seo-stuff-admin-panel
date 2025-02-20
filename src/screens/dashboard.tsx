@@ -68,20 +68,26 @@ export default function Dashboard() {
             const fetchedUsers = data.users;
             setUsers(fetchedUsers);
 
+            // Calculate one year ago date
+            const oneYearAgo = new Date();
+            oneYearAgo.setFullYear(oneYearAgo.getFullYear() - 1);
+
             // Fetch credits for all users
             const creditsMap: Record<string, number> = {};
             for (const user of fetchedUsers) {
                 const { data: creditsData, error: creditsError } = await supabaseBrowserClient
                     .from("credits")
-                    .select("credits")
+                    .select("credits,created_at")
                     .eq("user_id", user.id);
 
                 if (creditsError) {
                     console.error(`Error fetching credits for user ${user.id}:`, creditsError);
                     continue;
                 }
-
-                const totalCredits = creditsData.reduce((sum, credit) => sum + credit.credits, 0);
+                const totalCredits = creditsData.reduce((sum, credit) => {
+                    const creditDate = new Date(credit.created_at);
+                    return creditDate >= oneYearAgo ? sum + credit.credits : sum;
+                }, 0);
                 creditsMap[user.id] = totalCredits;
             }
 

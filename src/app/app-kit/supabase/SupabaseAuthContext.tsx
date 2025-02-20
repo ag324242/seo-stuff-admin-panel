@@ -99,7 +99,6 @@ export function SupabaseAuthContextProvider({ children }) {
     const { data: reports, error } = await supabaseClient
       .from("reports")
       .select("credits,created_at,user_id")
-      .neq("user_id", user.id)
       .order("created_at", { ascending: false });
 
     if (reports) {
@@ -114,9 +113,7 @@ export function SupabaseAuthContextProvider({ children }) {
         userId,
         totalCredits,
     }))
-    console.log(userCreditsArray);
-      console.log("check the total credits==>", totalUsedCredits)
-      setTotalUsedCredits(userCreditsArray);
+    setTotalUsedCredits(userCreditsArray);
     }
     
   };
