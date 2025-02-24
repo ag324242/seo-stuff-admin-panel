@@ -11,7 +11,6 @@ import { USERS } from "../types/user/type";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
-
 interface UserDetails {
     id: string;
     name: string;
@@ -32,10 +31,9 @@ export default function Dashboard() {
     const [userDetails, setUserDetails] = useState<UserDetails[]>([]);
     const [searchQuery, setSearchQuery] = useState("");
     const [isPaginatedLoading, setIsPaginatedLoading] = useState(true);
-    
 
     useEffect(() => {
-        if (!auth.isLoading ) {
+        if (!auth.isLoading) {
             if (auth.session) {
                 setLoading(false);
                 fetchUser();
@@ -43,10 +41,70 @@ export default function Dashboard() {
                 router.push("/auth/login");
             }
         }
-    }, [auth.isLoading, auth.session, router, auth.totalUsedCredits]);
-    
-    
+    }, [auth.isLoading, auth.session, router]);
 
+    useEffect(() => {
+        if (users.length > 0 && Object.keys(userCredits).length > 0) {
+            const updatedUserDetails = users.map((user) => ({
+                id: user.id,
+                name: user.user_metadata?.first_name,
+                email: user.email,
+                credits: userCredits[user.id] ?? 0,
+            }));
+
+            setUserDetails(updatedUserDetails);
+            setIsPaginatedLoading(false);
+        }
+    }, [users, userCredits]);
+
+    /** Fetch all users with pagination */
+    const fetchUsers = async (userId: string) => {
+        let allUsers: USERS[] = [];
+        let page = 1;
+        const PAGE_SIZE = 100;
+
+        while (true) {
+            const response = await fetch(`/api/users?userId=${userId}&page=${page}`);
+            const data = await response.json();
+
+            if (!data.users || !Array.isArray(data.users)) break;
+
+            allUsers = [...allUsers, ...data.users];
+
+            if (data.users.length < PAGE_SIZE) break;
+            page++;
+        }
+
+        return allUsers;
+    };
+
+    /** Fetch all credits with pagination */
+    const fetchAllCredits = async () => {
+        let allCredits: any[] = [];
+        let page = 1;
+        const PAGE_SIZE = 100;
+
+        while (true) {
+            const { data, error } = await supabaseBrowserClient
+                .from("credits")
+                .select("user_id, credits, created_at")
+                .range((page - 1) * PAGE_SIZE, page * PAGE_SIZE - 1);
+
+            if (error) {
+                console.error("Error fetching credits:", error);
+                break;
+            }
+
+            if (!data || data.length === 0) break;
+
+            allCredits = [...allCredits, ...data];
+            page++;
+        }
+
+        return allCredits;
+    };
+
+    /** Fetch user details and credits */
     const fetchUser = async () => {
         setIsPaginatedLoading(true);
         try {
@@ -56,42 +114,27 @@ export default function Dashboard() {
                 return;
             }
 
-            const response = await fetch(`/api/users?userId=${user.id}`);
-            const data = await response.json();
-            
-            if (!data.users || !Array.isArray(data.users)) {
-                console.error("Invalid users data:", data);
-                return;
-            }
+            // Fetch users and credits
+            const [allUsers, allCredits] = await Promise.all([
+                fetchUsers(user.id),
+                fetchAllCredits()
+            ]);
 
-            // Store users first
-            const fetchedUsers = data.users;
-            setUsers(fetchedUsers);
+            setUsers(allUsers);
 
-            // Calculate one year ago date
+            // Process credits
+            const creditsMap: Record<string, number> = {};
             const oneYearAgo = new Date();
             oneYearAgo.setFullYear(oneYearAgo.getFullYear() - 1);
 
-            // Fetch credits for all users
-            const creditsMap: Record<string, number> = {};
-            for (const user of fetchedUsers) {
-                const { data: creditsData, error: creditsError } = await supabaseBrowserClient
-                    .from("credits")
-                    .select("credits,created_at")
-                    .eq("user_id", user.id);
-
-                if (creditsError) {
-                    console.error(`Error fetching credits for user ${user.id}:`, creditsError);
-                    continue;
+            allCredits.forEach((credit) => {
+                const creditDate = new Date(credit.created_at);
+                if (creditDate >= oneYearAgo) {
+                    creditsMap[credit.user_id] = (creditsMap[credit.user_id] || 0) + credit.credits;
                 }
-                const totalCredits = creditsData.reduce((sum, credit) => {
-                    const creditDate = new Date(credit.created_at);
-                    return creditDate >= oneYearAgo ? sum + credit.credits : sum;
-                }, 0);
-                creditsMap[user.id] = totalCredits;
-            }
+            });
 
-            // Calculate remaining credits
+            // Adjust remaining credits
             const remainingCreditsMap: Record<string, number> = {};
             if (auth.totalUsedCredits) {
                 Object.keys(creditsMap).forEach((userId) => {
@@ -102,71 +145,43 @@ export default function Dashboard() {
                 Object.assign(remainingCreditsMap, creditsMap);
             }
 
-            // Update credits
             setUserCredits(remainingCreditsMap);
-
-            // Create and set user details immediately
-            const updatedUserDetails = fetchedUsers.map((user:any) => ({
-                id: user.id,
-                name: user.user_metadata.first_name,
-                email: user.email,
-                credits: remainingCreditsMap[user.id] ?? 0,
-            }));
-
-            setUserDetails(updatedUserDetails);
-            setLoading(false);
-            setIsPaginatedLoading(false);
-
         } catch (error) {
             console.error("Error fetching user data:", error);
+        } finally {
             setLoading(false);
             setIsPaginatedLoading(false);
         }
     };
 
     const handleSearch = (query: string) => {
-        setIsPaginatedLoading(true);
         setSearchQuery(query);
         setCurrentPage(1);
-        setIsPaginatedLoading(false); 
     };
 
+    const filteredUsers = userDetails.filter((user) =>
+        !searchQuery.trim() ||
+        user.name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        user.email?.toLowerCase().includes(searchQuery.toLowerCase())
+    );
 
-
-    // Filter users based on search query
-    const filteredUsers = userDetails.filter((user) => {
-        if (!searchQuery.trim()) return true;
-        
-        return (
-            user.name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-            user.email?.toLowerCase().includes(searchQuery.toLowerCase())
-        );
-    });
-
-
-
-    // Calculate pagination for filtered results
     const totalPages = Math.ceil(filteredUsers.length / ITEMS_PER_PAGE);
     const paginatedUsers = filteredUsers.slice(
         (currentPage - 1) * ITEMS_PER_PAGE,
         currentPage * ITEMS_PER_PAGE
     );
 
-
-
-
-    const handleUpdate = (userId: string, newCredits: number) => {
+    const handleUpdate = async (userId: string, newCredits: number) => {
         setUserCredits((prev) => ({
             ...prev,
             [userId]: newCredits,
         }));
-        setUserDetails((prev) => 
-            prev.map((user) => 
-                user.id === userId 
-                    ? { ...user, credits: newCredits }
-                    : user
+        setUserDetails((prev) =>
+            prev.map((user) =>
+                user.id === userId ? { ...user, credits: newCredits } : user
             )
         );
+        await fetchUser();
     };
 
     const handleEdit = (user: UserDetails) => {
@@ -175,7 +190,7 @@ export default function Dashboard() {
     };
 
     if (loading) {
-        return <Loading/>;
+        return <Loading />;
     }
 
     return (
@@ -193,37 +208,12 @@ export default function Dashboard() {
                     isLoading={isPaginatedLoading}
                     onEdit={handleEdit}
                 />
-
-                {/* Pagination */}
                 <div className="flex justify-center items-center mt-4 space-x-2">
-                    <button
-                        onClick={() => setCurrentPage((prev) => Math.max(prev - 1, 1))}
-                        disabled={currentPage === 1}
-                        className="px-4 py-2 text-white bg-primary rounded disabled:opacity-50"
-                    >
-                        Prev
-                    </button>
-                    <span className="px-4 py-2 text-gray-700">
-                        Page {currentPage} of {totalPages}
-                    </span>
-                    <button
-                        onClick={() => setCurrentPage((prev) => Math.min(prev + 1, totalPages))}
-                        disabled={currentPage === totalPages}
-                        className="px-4 py-2 bg-primary text-white rounded disabled:opacity-50"
-                    >
-                        Next
-                    </button>
+                    <button className="px-4 py-2 bg-primary text-white rounded disabled:opacity-50" onClick={() => setCurrentPage((p) => Math.max(p - 1, 1))} disabled={currentPage === 1}>Prev</button>
+                    <span className="px-4 py-2 text-gray-700">Page {currentPage} of {totalPages}</span>
+                    <button className="px-4 py-2 bg-primary text-white rounded disabled:opacity-50" onClick={() => setCurrentPage((p) => Math.min(p + 1, totalPages))} disabled={currentPage === totalPages}>Next</button>
                 </div>
-
-                {/* Dialog Edit credits */}
-                {selectedUser && (
-                    <EditCreditsDialog
-                        isOpen={isDialogOpen}
-                        onClose={() => setIsDialogOpen(false)}
-                        user={selectedUser}
-                        onUpdate={handleUpdate}
-                    />
-                )}
+                {selectedUser && <EditCreditsDialog isOpen={isDialogOpen} onClose={() => setIsDialogOpen(false)} user={selectedUser} onUpdate={handleUpdate} />}
             </div>
         </div>
     );

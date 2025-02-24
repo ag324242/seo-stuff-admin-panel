@@ -50,7 +50,8 @@ const handleUpdateCredit = async () => {
                     user_id: user.id,
                     credits: Math.abs(creditDifference), 
                     status: "completed",
-                    type: "deducted by admin"
+                    type: "deducted by admin",
+                    cost:0
                 },
             ]);
             toast.success("User credit deducted successfully!");
