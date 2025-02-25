@@ -11,7 +11,7 @@ interface EditCreditsDialogProps {
   onUpdate: Function;
 }
 
-const EditCreditsDialog = ({ isOpen, onClose, user,onUpdate }: EditCreditsDialogProps) => {
+const EditCreditsDialog = ({ isOpen, onClose, user, onUpdate }: EditCreditsDialogProps) => {
   const [credits, setCredits] = useState(user.credits);
 
   useEffect(() => {
@@ -60,7 +60,7 @@ const handleUpdateCredit = async () => {
             return;
         }
         }
-        onUpdate(user.id, credits);
+        onUpdate();
         onClose();
 };
 

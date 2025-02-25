@@ -12,7 +12,7 @@ const SearchBar: React.FC<SearchBarProps> = ({ onSearch, placeholder }) => {
 
  
   const debouncedSearch = useCallback(
-    debounce((query:any) => {
+    debounce((query:string) => {
       onSearch(query);
     }, 300),
     []

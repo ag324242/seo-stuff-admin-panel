@@ -1,5 +1,6 @@
 import { FiEdit } from "react-icons/fi";
 import ListLoader from "./common/loader/listLoader";
+import { User } from "../types/user/type";
 
 interface UserDetails {
     id: string;
@@ -17,16 +18,17 @@ interface UserTableProps {
     onEdit: (user: UserDetails) => void;
 }
 
-const UserTable: React.FC<UserTableProps> = ({
+const UserTable: React.FC<any> = ({
     users,
     currentPage,
     itemsPerPage,
     isLoading,
     onEdit
 }) => {
+
     return (
-        <div className="overflow-x-auto">
-            <table className="min-w-full bg-white border rounded-lg shadow">
+        <div className="overflow-x-auto h-full">
+            <table className="min-w-full bg-white border rounded-lg shadow ">
                 <thead>
                     <tr className="bg-purple-500 text-white uppercase text-sm leading-normal">
                         <th className="py-3 px-6 text-left">ID</th>
@@ -47,10 +49,10 @@ const UserTable: React.FC<UserTableProps> = ({
                             </td>
                         </tr>
                     ) : users.length > 0 ? (
-                        users.map((user, index) => (
+                        users.map((user:User, index:number) => (
                             <tr key={user.id} className="border-b hover:bg-gray-100">
                                 <td className="py-3 px-6">{(currentPage - 1) * itemsPerPage + index + 1}</td>
-                                <td className="py-3 px-6">{user.name}</td>
+                                <td className="py-3 px-6">{user.raw_user_meta_data.name || user.raw_user_meta_data.first_name}</td>
                                 <td className="py-3 px-6">{user.email}</td>
                                 <td className="py-3 px-6">{user.credits}</td>
                                 <td className="py-3 px-6 flex justify-center">

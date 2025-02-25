@@ -79,77 +79,19 @@ export function SupabaseAuthContextProvider({ children }) {
     }
   }, [session]);
 
-  const fetchAllReports = async () => {
-    let allReports: Report[] = [];
-    let lastFetchedCount = 0;
-    let page = 0;
-    const batchSize = 1000; 
-
-    do {
-
-        const { data: reports, error } = await supabaseClient
-            .from("reports")
-            .select("credits, created_at, user_id", { count: "exact" }) 
-            .order("created_at", { ascending: false }) 
-            .range(page * batchSize, (page + 1) * batchSize - 1); 
-
-        if (error) {
-            console.error("Error fetching reports:", error);
-            break;
-        }
-
-        if (reports && reports.length > 0) {
-            allReports = [...allReports, ...reports];
-            lastFetchedCount = reports.length;
-            page++;
-        } else { 
-            break; 
-        }
-    } while (lastFetchedCount === batchSize); 
-
-    return allReports; 
-};
-
-
-
-const getUsedCredits = useCallback(async () => {
-  const oneYearAgo = new Date();
-  oneYearAgo.setFullYear(oneYearAgo.getFullYear() - 1);
-
-  const { data: { user } } = await supabaseServerClient.auth.getUser();
-  if (!user || totalUsedCredits?.length) return; 
-
-  const reports = await fetchAllReports();
-  if (!reports.length) return;
-
-  const userCreditsMap = new Map();
-  reports.forEach((report) => {
-      userCreditsMap.set(report.user_id, (userCreditsMap.get(report.user_id) || 0) + report.credits);
-  });
-
-  const userCreditsArray = Array.from(userCreditsMap, ([userId, totalCredits]) => ({
-      userId,
-      totalCredits,
-  }));
-
-  setTotalUsedCredits(userCreditsArray);
-}, [totalUsedCredits]);
-
 useEffect(() => {
   if (user) {
     identify(user.id);
-    getUsedCredits();
   }
-}, [user, getUsedCredits]);
+}, [user]);
 
 
   useEffect(() => {
     logger("user", user);
     if (user) {
       identify(user.id);
-      getUsedCredits();
     }
-  }, [user,getUsedCredits]);
+  }, [user,]);
 
 
 

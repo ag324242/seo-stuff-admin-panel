@@ -1,15 +1,14 @@
 "use client";
 
 import { useSupabaseAuthContext } from "@/app-kit/supabase/SupabaseAuthContext";
-import supabaseBrowserClient from "@/app-kit/supabase/supabaseClient";
-import supabaseServerClient from "@/app-kit/supabase/supabaseService";
 import Loading from "../components/common/loader/loading";
 import EditCreditsDialog from "../components/dialog";
 import SearchBar from "../components/search";
 import UserTable from "../components/userTable";
-import { USERS } from "../types/user/type";
 import { useRouter } from "next/navigation";
 import { useEffect, useState, useMemo, useCallback } from "react";
+import  debounce  from 'lodash.debounce';
+import { User } from "../types/user/type";
 
 interface UserDetails {
     id: string;
@@ -22,175 +21,64 @@ export default function Dashboard() {
     const auth = useSupabaseAuthContext();
     const router = useRouter();
     const [loading, setLoading] = useState(true);
-    const [users, setUsers] = useState<USERS[]>([]);
+    const [users, setUsers] = useState<User[]>([]);
     const [currentPage, setCurrentPage] = useState(1);
-    const [userCredits, setUserCredits] = useState<Record<string, number>>({});
     const [selectedUser, setSelectedUser] = useState<UserDetails | null>(null);
     const [isDialogOpen, setIsDialogOpen] = useState(false);
     const ITEMS_PER_PAGE = 10;
-    const [userDetails, setUserDetails] = useState<UserDetails[]>([]);
     const [searchQuery, setSearchQuery] = useState("");
     const [isPaginatedLoading, setIsPaginatedLoading] = useState(true);
+    const [totalPages, setTotalPages] = useState<number>(0);
+    
 
     useEffect(() => {
-        if (!auth.isLoading && auth.totalUsedCredits) {
+        if (!auth.isLoading ) {
             if (auth.session) {
                 setLoading(false);
-                fetchUser();
+                fetchUsers(1);
             } else {
                 router.push("/auth/login");
             }
         }
-    }, [auth.isLoading, auth.session, router, auth.totalUsedCredits]);
+    }, [auth.isLoading, auth.session, router]);
 
     useEffect(() => {
-        if (users.length > 0 && Object.keys(userCredits).length > 0) {
-            const updatedUserDetails = users.map((user) => ({
-                id: user.id,
-                name: user.user_metadata?.first_name,
-                email: user.email,
-                credits: userCredits[user.id] ?? 0,
-            }));
+        return () => {
+          debouncedFetchUsers.cancel(); // Clean up the debounced function
+        };
+      }, []);
 
-            setUserDetails(updatedUserDetails);
-            setIsPaginatedLoading(false);
-        }
-    }, [users, userCredits]);
 
     /** Fetch all users with pagination */
-    const fetchUsers = useCallback(async (userId: string) => {
-        let allUsers: USERS[] = [];
-        let page = 1;
-        const PAGE_SIZE = 100;
+    const fetchUsers = async (pageNo: number, searchValue: string = "") => {
+        setIsPaginatedLoading(true)
+        let allUsers: User[] = [];
 
-        while (true) {
-            const response = await fetch(`/api/users?userId=${userId}&page=${page}`);
-            const data = await response.json();
+        const response = await fetch(`/api/users?page=${pageNo}&search=${searchValue}`);
+        const data = await response.json();
 
-            if (!data.users || !Array.isArray(data.users)) break;
+        if (!data.users || !Array.isArray(data.users))
+            return allUsers
 
-            allUsers = [...allUsers, ...data.users];
-
-            if (data.users.length < PAGE_SIZE) break;
-            page++;
-        }
+        allUsers = [...allUsers, ...data.users];
+        setIsPaginatedLoading(false)
+        setUsers(allUsers)
+        setTotalPages(data?.totalPages)
 
         return allUsers;
-    }, []);
+    };
 
-    /** Fetch all credits with pagination */
-    const fetchAllCredits = useCallback(async () => {
-        let allCredits: any[] = [];
-        let page = 1;
-        const PAGE_SIZE = 100;
-
-        while (true) {
-            const { data, error } = await supabaseBrowserClient
-                .from("credits")
-                .select("user_id, credits, created_at")
-                .range((page - 1) * PAGE_SIZE, page * PAGE_SIZE - 1);
-
-            if (error) {
-                console.error("Error fetching credits:", error);
-                break;
-            }
-
-            if (!data || data.length === 0) break;
-
-            allCredits = [...allCredits, ...data];
-            page++;
-        }
-
-        return allCredits;
-    }, []);
-
-    /** Fetch user details and credits */
-    const fetchUser = useCallback(async () => {
-        setIsPaginatedLoading(true);
-        try {
-            const { data: { user } } = await supabaseServerClient.auth.getUser();
-            if (!user) {
-                console.error("No logged-in user found");
-                return;
-            }
-    
-            // Fetch users and credits
-            const [allUsers, allCredits] = await Promise.all([
-                fetchUsers(user.id),
-                fetchAllCredits()
-            ]);
-    
-            setUsers(allUsers);
-    
-            // Process credits for each user
-            const creditsMap: Record<string, number> = {};
-            const oneYearAgo = new Date();
-            oneYearAgo.setFullYear(oneYearAgo.getFullYear() - 1);
-    
-            allCredits.forEach((credit) => {
-                const creditDate = new Date(credit.created_at);
-                if (creditDate >= oneYearAgo) {
-                    creditsMap[credit.user_id] = (creditsMap[credit.user_id] || 0) + credit.credits;
-                }
-            });
-    
-            // Convert totalUsedCredits array into a Map
-            const usedCreditsMap = new Map(
-                auth.totalUsedCredits?.map(({ userId, totalCredits }) => [userId, totalCredits]) || []
-            );
-    
-            // Adjust remaining credits
-            const remainingCreditsMap: Record<string, number> = {};
-            Object.keys(creditsMap).forEach((userId) => {
-                const usedCredits = usedCreditsMap.get(userId) || 0;
-                remainingCreditsMap[userId] = Math.max(0, creditsMap[userId] - usedCredits);
-            });
-    
-            setUserCredits(remainingCreditsMap);
-        } catch (error) {
-            console.error("Error fetching user data:", error);
-        } finally {
-            setLoading(false);
-            setIsPaginatedLoading(false);
-        }
-    }, [auth.totalUsedCredits, fetchUsers, fetchAllCredits]);
-
-    // Memoize filtered and paginated users to prevent unnecessary recalculations
-    const filteredUsers = useMemo(() => {
-        return userDetails.filter((user) =>
-            !searchQuery.trim() ||
-            user.name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-            user.email?.toLowerCase().includes(searchQuery.toLowerCase())
-        );
-    }, [userDetails, searchQuery]);
-
-    const { paginatedUsers, totalPages } = useMemo(() => {
-        const total = Math.ceil(filteredUsers.length / ITEMS_PER_PAGE);
-        const paginated = filteredUsers.slice(
-            (currentPage - 1) * ITEMS_PER_PAGE,
-            currentPage * ITEMS_PER_PAGE
-        );
-        return { paginatedUsers: paginated, totalPages: total };
-    }, [filteredUsers, currentPage, ITEMS_PER_PAGE]);
+    const debouncedFetchUsers = debounce((page: number, query: string) => {
+        fetchUsers(page, query);
+      }, 900);
 
     // Handler functions
     const handleSearch = useCallback((query: string) => {
         setSearchQuery(query);
+        debouncedFetchUsers(1, query)
         setCurrentPage(1);
-    }, []);
 
-    const handleUpdate = useCallback(async (userId: string, newCredits: number) => {
-        setUserCredits((prev) => ({
-            ...prev,
-            [userId]: newCredits,
-        }));
-        setUserDetails((prev) =>
-            prev.map((user) =>
-                user.id === userId ? { ...user, credits: newCredits } : user
-            )
-        );
-        await fetchUser();
-    }, [fetchUser]);
+    }, []);
 
     const handleEdit = useCallback((user: UserDetails) => {
         setSelectedUser(user);
@@ -198,12 +86,25 @@ export default function Dashboard() {
     }, []);
 
     const handlePrevPage = useCallback(() => {
-        setCurrentPage((p) => Math.max(p - 1, 1));
-    }, []);
+
+        let previousPage = Math.max(currentPage - 1, 1);
+
+        setCurrentPage(previousPage);
+        fetchUsers(previousPage)
+
+    }, [currentPage]);
 
     const handleNextPage = useCallback(() => {
-        setCurrentPage((p) => Math.min(p + 1, totalPages));
-    }, [totalPages]);
+        let nextPage = Math.min(currentPage + 1, totalPages);
+        setCurrentPage(nextPage);
+        fetchUsers(nextPage)
+
+    }, [totalPages, currentPage]);
+
+    const handleUpdate = async () => {
+        await fetchUsers(currentPage, searchQuery);
+    };
+
 
     if (loading) {
         return (<div className="flex w-full justify-center items-center h-screen"><Loading/></div>);
@@ -217,7 +118,7 @@ export default function Dashboard() {
                     <SearchBar onSearch={handleSearch} placeholder="Search users by name or email" />
                 </div>
                 <UserTable
-                    users={paginatedUsers}
+                    users={users}
                     currentPage={currentPage}
                     totalPages={totalPages}
                     itemsPerPage={ITEMS_PER_PAGE}

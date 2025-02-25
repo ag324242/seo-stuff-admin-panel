@@ -1,31 +1,53 @@
-export interface USERS{
-    id: string;
-    aud: string;
-    role: string;
-    email: string;
-    email_confirmed_at: string;
-    phone: string;
-    confirmation_sent_at: string;
-    confirmed_at: string;
-    last_sign_in_at: string;
-    app_metadata: AppMetadata;
-    user_metadata: UserMetadata;
-    identities: null | undefined; 
-    created_at: string;
-    updated_at: string;
-    is_anonymous: boolean;
-}
-
-type AppMetadata = {
+export interface User {
+  instance_id: string;
+  id: string;
+  aud: string;
+  role: string;
+  email: string;
+  encrypted_password: string;
+  email_confirmed_at: string | null;
+  invited_at: string | null;
+  confirmation_token: string;
+  confirmation_sent_at: string | null;
+  recovery_token: string;
+  recovery_sent_at: string | null;
+  email_change_token_new: string;
+  email_change: string;
+  email_change_sent_at: string | null;
+  last_sign_in_at: string;
+  raw_app_meta_data: {
     provider: string;
     providers: string[];
   };
-  
-  type UserMetadata = {
-    email: string;
-    email_verified: boolean;
-    first_name: string;
-    last_name: string;
-    phone_verified: boolean;
+  raw_user_meta_data: {
+    iss: string;
     sub: string;
+    name: string;
+    email: string;
+    picture: string;
+    full_name: string;
+    avatar_url: string;
+    provider_id: string;
+    email_verified: boolean;
+    phone_verified: boolean;
+    first_name?: string
   };
+  is_super_admin: boolean | null;
+  created_at: string;
+  updated_at: string;
+  phone: string | null;
+  phone_confirmed_at: string | null;
+  phone_change: string;
+  phone_change_token: string;
+  phone_change_sent_at: string | null;
+  confirmed_at: string;
+  email_change_token_current: string;
+  email_change_confirm_status: number;
+  banned_until: string | null;
+  reauthentication_token: string;
+  reauthentication_sent_at: string | null;
+  is_sso_user: boolean;
+  deleted_at: string | null;
+  is_anonymous: boolean;
+  credits: number;
+};
