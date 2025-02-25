@@ -107,7 +107,7 @@ export function SupabaseAuthContextProvider({ children }) {
         }
     } while (lastFetchedCount === batchSize); 
 
-    return allReports;
+    return allReports; 
 };
 
 
