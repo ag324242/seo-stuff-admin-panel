@@ -6,31 +6,30 @@ import axios from "axios";
 import { identify, identityReset } from "@/app-kit/analytics/analytics";
 import { usePlausible } from "next-plausible";
 import supabaseServerClient from "./supabaseService";
+import { useCallback } from "react";
 // import * as fbq from "@/lib/fpixel";
 interface IAuthContext {
   signOut: () => Promise<any>;
-  signUp: (
-    email: string,
-    password: string,
-    firstName: string,
-    lastName: string,
-  ) => Promise<any>;
   signIn: (email: string, password: string) => Promise<any>;
   user: User | null | undefined;
   session: Session | null | undefined;
   isLoading: boolean;
   isAdmin?: boolean;
-  showWelcome?: boolean;
-  setShowWelcome: (show: boolean) => void;
   totalUsedCredits: UsedCredit[] | null;
-  totalCredits: number | null;
-  creditStatus: string
+  creditStatus: string  
 }
 
 interface UsedCredit {
     userId: string; 
     totalCredits: number
 }
+
+interface Report {
+  credits: number;
+  created_at: string;
+  user_id: string;
+}
+
 
 // @ts-ignore
 const AuthContext = React.createContext<IAuthContext>({});
@@ -49,7 +48,6 @@ export function SupabaseAuthContextProvider({ children }) {
   const [isAdmin, setIsAdmin] = useState<boolean>(false);
   const [showWelcome, setShowWelcome] = useState<boolean>(false);
   const [totalUsedCredits, setTotalUsedCredits] = useState<UsedCredit[] | null>(null);
-  const [totalCredits, setTotalCredits] = useState<number | null>(null);
   const [creditStatus, setCreditStatus] = useState("");
 
   useEffect(() => {
@@ -81,42 +79,69 @@ export function SupabaseAuthContextProvider({ children }) {
     }
   }, [session]);
 
-  const getUsedCredits = async () => {
+  const fetchAllReports = async () => {
+    let allReports: Report[] = [];
+    let lastFetchedCount = 0;
+    let page = 0;
+    const batchSize = 1000; 
 
-    // CALCULATE EXPIRATION DATE (ONE YEAR AGO)
-    const oneYearAgo = new Date();
-    oneYearAgo.setFullYear(oneYearAgo.getFullYear() - 1);
+    do {
 
-    // GET LOGGED-IN USER
-    const { data: { user } } = await supabaseServerClient.auth.getUser();
-    if (!user || totalUsedCredits !== null) {
-    return;
-    }
+        const { data: reports, error } = await supabaseClient
+            .from("reports")
+            .select("credits, created_at, user_id", { count: "exact" }) 
+            .order("created_at", { ascending: false }) 
+            .range(page * batchSize, (page + 1) * batchSize - 1); 
 
-    // USED
-    const userCreditsMap = new Map();
+        if (error) {
+            console.error("Error fetching reports:", error);
+            break;
+        }
 
-    const { data: reports, error } = await supabaseClient
-      .from("reports")
-      .select("credits,created_at,user_id")
-      .order("created_at", { ascending: false });
+        if (reports && reports.length > 0) {
+            allReports = [...allReports, ...reports];
+            lastFetchedCount = reports.length;
+            page++;
+        } else { 
+            break; 
+        }
+    } while (lastFetchedCount === batchSize); 
 
-    if (reports) {
-      const totalUsedCredits = reports
-      .filter((report) => new Date(report.created_at) > oneYearAgo)
-      .forEach((report) => {
-        const userId = report.user_id;
-        userCreditsMap.set(userId, (userCreditsMap.get(userId) || 0) + report.credits);
-      });
+    return allReports;
+};
 
-    const userCreditsArray = Array.from(userCreditsMap, ([userId, totalCredits]) => ({
-        userId,
-        totalCredits,
-    }))
-    setTotalUsedCredits(userCreditsArray);
-    }
-    
-  };
+
+
+const getUsedCredits = useCallback(async () => {
+  const oneYearAgo = new Date();
+  oneYearAgo.setFullYear(oneYearAgo.getFullYear() - 1);
+
+  const { data: { user } } = await supabaseServerClient.auth.getUser();
+  if (!user || totalUsedCredits?.length) return; 
+
+  const reports = await fetchAllReports();
+  if (!reports.length) return;
+
+  const userCreditsMap = new Map();
+  reports.forEach((report) => {
+      userCreditsMap.set(report.user_id, (userCreditsMap.get(report.user_id) || 0) + report.credits);
+  });
+
+  const userCreditsArray = Array.from(userCreditsMap, ([userId, totalCredits]) => ({
+      userId,
+      totalCredits,
+  }));
+
+  setTotalUsedCredits(userCreditsArray);
+}, [totalUsedCredits]);
+
+useEffect(() => {
+  if (user) {
+    identify(user.id);
+    getUsedCredits();
+  }
+}, [user, getUsedCredits]);
+
 
   useEffect(() => {
     logger("user", user);
@@ -180,16 +205,12 @@ export function SupabaseAuthContextProvider({ children }) {
     <AuthContext.Provider
       value={{
         signOut,
-        signUp,
         signIn,
         user,
         session,
         isLoading,
         isAdmin,
-        showWelcome,
-        setShowWelcome,
         totalUsedCredits,
-        totalCredits,
         creditStatus,
       }}
     >

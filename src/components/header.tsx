@@ -16,7 +16,7 @@ export default function Header() {
         console.error("Sign-out error:", error.message);
         return;
       }
-      console.log("User signed out successfully.");
+      router.push("/auth/login");
     } catch (err) {
       console.error("Unexpected error during sign-out:", err);
     }

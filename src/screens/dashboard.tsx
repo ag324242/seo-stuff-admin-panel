@@ -9,7 +9,7 @@ import SearchBar from "../components/search";
 import UserTable from "../components/userTable";
 import { USERS } from "../types/user/type";
 import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useMemo, useCallback } from "react";
 
 interface UserDetails {
     id: string;
@@ -33,7 +33,7 @@ export default function Dashboard() {
     const [isPaginatedLoading, setIsPaginatedLoading] = useState(true);
 
     useEffect(() => {
-        if (!auth.isLoading) {
+        if (!auth.isLoading && auth.totalUsedCredits) {
             if (auth.session) {
                 setLoading(false);
                 fetchUser();
@@ -41,7 +41,7 @@ export default function Dashboard() {
                 router.push("/auth/login");
             }
         }
-    }, [auth.isLoading, auth.session, router]);
+    }, [auth.isLoading, auth.session, router, auth.totalUsedCredits]);
 
     useEffect(() => {
         if (users.length > 0 && Object.keys(userCredits).length > 0) {
@@ -58,7 +58,7 @@ export default function Dashboard() {
     }, [users, userCredits]);
 
     /** Fetch all users with pagination */
-    const fetchUsers = async (userId: string) => {
+    const fetchUsers = useCallback(async (userId: string) => {
         let allUsers: USERS[] = [];
         let page = 1;
         const PAGE_SIZE = 100;
@@ -76,10 +76,10 @@ export default function Dashboard() {
         }
 
         return allUsers;
-    };
+    }, []);
 
     /** Fetch all credits with pagination */
-    const fetchAllCredits = async () => {
+    const fetchAllCredits = useCallback(async () => {
         let allCredits: any[] = [];
         let page = 1;
         const PAGE_SIZE = 100;
@@ -102,10 +102,10 @@ export default function Dashboard() {
         }
 
         return allCredits;
-    };
+    }, []);
 
     /** Fetch user details and credits */
-    const fetchUser = async () => {
+    const fetchUser = useCallback(async () => {
         setIsPaginatedLoading(true);
         try {
             const { data: { user } } = await supabaseServerClient.auth.getUser();
@@ -113,38 +113,39 @@ export default function Dashboard() {
                 console.error("No logged-in user found");
                 return;
             }
-
+    
             // Fetch users and credits
             const [allUsers, allCredits] = await Promise.all([
                 fetchUsers(user.id),
                 fetchAllCredits()
             ]);
-
+    
             setUsers(allUsers);
-
-            // Process credits
+    
+            // Process credits for each user
             const creditsMap: Record<string, number> = {};
             const oneYearAgo = new Date();
             oneYearAgo.setFullYear(oneYearAgo.getFullYear() - 1);
-
+    
             allCredits.forEach((credit) => {
                 const creditDate = new Date(credit.created_at);
                 if (creditDate >= oneYearAgo) {
                     creditsMap[credit.user_id] = (creditsMap[credit.user_id] || 0) + credit.credits;
                 }
             });
-
+    
+            // Convert totalUsedCredits array into a Map
+            const usedCreditsMap = new Map(
+                auth.totalUsedCredits?.map(({ userId, totalCredits }) => [userId, totalCredits]) || []
+            );
+    
             // Adjust remaining credits
             const remainingCreditsMap: Record<string, number> = {};
-            if (auth.totalUsedCredits) {
-                Object.keys(creditsMap).forEach((userId) => {
-                    const usedCredits = auth.totalUsedCredits?.find((u) => u.userId === userId)?.totalCredits || 0;
-                    remainingCreditsMap[userId] = Math.max(0, creditsMap[userId] - usedCredits);
-                });
-            } else {
-                Object.assign(remainingCreditsMap, creditsMap);
-            }
-
+            Object.keys(creditsMap).forEach((userId) => {
+                const usedCredits = usedCreditsMap.get(userId) || 0;
+                remainingCreditsMap[userId] = Math.max(0, creditsMap[userId] - usedCredits);
+            });
+    
             setUserCredits(remainingCreditsMap);
         } catch (error) {
             console.error("Error fetching user data:", error);
@@ -152,26 +153,33 @@ export default function Dashboard() {
             setLoading(false);
             setIsPaginatedLoading(false);
         }
-    };
+    }, [auth.totalUsedCredits, fetchUsers, fetchAllCredits]);
 
-    const handleSearch = (query: string) => {
+    // Memoize filtered and paginated users to prevent unnecessary recalculations
+    const filteredUsers = useMemo(() => {
+        return userDetails.filter((user) =>
+            !searchQuery.trim() ||
+            user.name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+            user.email?.toLowerCase().includes(searchQuery.toLowerCase())
+        );
+    }, [userDetails, searchQuery]);
+
+    const { paginatedUsers, totalPages } = useMemo(() => {
+        const total = Math.ceil(filteredUsers.length / ITEMS_PER_PAGE);
+        const paginated = filteredUsers.slice(
+            (currentPage - 1) * ITEMS_PER_PAGE,
+            currentPage * ITEMS_PER_PAGE
+        );
+        return { paginatedUsers: paginated, totalPages: total };
+    }, [filteredUsers, currentPage, ITEMS_PER_PAGE]);
+
+    // Handler functions
+    const handleSearch = useCallback((query: string) => {
         setSearchQuery(query);
         setCurrentPage(1);
-    };
+    }, []);
 
-    const filteredUsers = userDetails.filter((user) =>
-        !searchQuery.trim() ||
-        user.name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        user.email?.toLowerCase().includes(searchQuery.toLowerCase())
-    );
-
-    const totalPages = Math.ceil(filteredUsers.length / ITEMS_PER_PAGE);
-    const paginatedUsers = filteredUsers.slice(
-        (currentPage - 1) * ITEMS_PER_PAGE,
-        currentPage * ITEMS_PER_PAGE
-    );
-
-    const handleUpdate = async (userId: string, newCredits: number) => {
+    const handleUpdate = useCallback(async (userId: string, newCredits: number) => {
         setUserCredits((prev) => ({
             ...prev,
             [userId]: newCredits,
@@ -182,15 +190,23 @@ export default function Dashboard() {
             )
         );
         await fetchUser();
-    };
+    }, [fetchUser]);
 
-    const handleEdit = (user: UserDetails) => {
+    const handleEdit = useCallback((user: UserDetails) => {
         setSelectedUser(user);
         setIsDialogOpen(true);
-    };
+    }, []);
+
+    const handlePrevPage = useCallback(() => {
+        setCurrentPage((p) => Math.max(p - 1, 1));
+    }, []);
+
+    const handleNextPage = useCallback(() => {
+        setCurrentPage((p) => Math.min(p + 1, totalPages));
+    }, [totalPages]);
 
     if (loading) {
-        return <Loading />;
+        return (<div className="flex w-full justify-center items-center h-screen"><Loading/></div>);
     }
 
     return (
@@ -209,11 +225,32 @@ export default function Dashboard() {
                     onEdit={handleEdit}
                 />
                 <div className="flex justify-center items-center mt-4 space-x-2">
-                    <button className="px-4 py-2 bg-primary text-white rounded disabled:opacity-50" onClick={() => setCurrentPage((p) => Math.max(p - 1, 1))} disabled={currentPage === 1}>Prev</button>
-                    <span className="px-4 py-2 text-gray-700">Page {currentPage} of {totalPages}</span>
-                    <button className="px-4 py-2 bg-primary text-white rounded disabled:opacity-50" onClick={() => setCurrentPage((p) => Math.min(p + 1, totalPages))} disabled={currentPage === totalPages}>Next</button>
+                    <button 
+                        className="px-4 py-2 bg-primary text-white rounded disabled:opacity-50" 
+                        onClick={handlePrevPage} 
+                        disabled={currentPage === 1}
+                    >
+                        Prev
+                    </button>
+                    <span className="px-4 py-2 text-gray-700">
+                        Page {currentPage} of {totalPages}
+                    </span>
+                    <button 
+                        className="px-4 py-2 bg-primary text-white rounded disabled:opacity-50" 
+                        onClick={handleNextPage} 
+                        disabled={currentPage === totalPages}
+                    >
+                        Next
+                    </button>
                 </div>
-                {selectedUser && <EditCreditsDialog isOpen={isDialogOpen} onClose={() => setIsDialogOpen(false)} user={selectedUser} onUpdate={handleUpdate} />}
+                {selectedUser && (
+                    <EditCreditsDialog 
+                        isOpen={isDialogOpen} 
+                        onClose={() => setIsDialogOpen(false)} 
+                        user={selectedUser} 
+                        onUpdate={handleUpdate} 
+                    />
+                )}
             </div>
         </div>
     );
